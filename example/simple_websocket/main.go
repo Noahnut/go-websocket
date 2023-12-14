@@ -36,11 +36,21 @@ func websocketClient() {
 		panic(err)
 	}
 
+	client.Ping()
+
+	frameType, payload, _ := client.Read()
+
+	fmt.Println(frameType, string(payload))
+
 	client.Write([]byte("hello world"))
 
-	fmt.Println(string(client.Read()))
+	frameType, payload, _ = client.Read()
 
-	client.Close()
+	fmt.Println(frameType, string(payload))
+
+	frameType, status := client.Close()
+
+	fmt.Printf("close frameType %d status %d\n", frameType, status)
 }
 
 func main() {

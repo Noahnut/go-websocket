@@ -16,6 +16,8 @@ const (
 type Conn struct {
 	c net.Conn
 
+	isClose bool
+
 	waitGroup sync.WaitGroup
 
 	bufferReader *bufio.Reader
@@ -66,7 +68,7 @@ func (c *Conn) readLoop() {
 
 		// receive close frame just end readLoop routine
 		if newFrame.IsClose() {
-			fmt.Println("readLoop close")
+			c.isClose = true
 			return
 		}
 
@@ -74,7 +76,21 @@ func (c *Conn) readLoop() {
 }
 
 func (c *Conn) writeLoop() {
-	defer c.waitGroup.Done()
+
+	defer func() {
+		remainWrite := len(c.WriteChan)
+
+		for i := 0; i < remainWrite; i++ {
+			frame := <-c.WriteChan
+			if _, err := frame.WriteTo(c.bufferWriter); err == nil {
+				c.bufferWriter.Flush()
+			}
+		}
+
+		close(c.WriteChan)
+
+		c.waitGroup.Done()
+	}()
 
 	for {
 		select {
@@ -84,9 +100,7 @@ func (c *Conn) writeLoop() {
 			}
 
 		case <-c.ctx.Done():
-			fmt.Println("writeLoop ctx done")
 			return
-		default:
 		}
 	}
 }
@@ -99,6 +113,10 @@ func (c *Conn) Write(p []byte) (int, error) {
 	frame.SetPayload(p)
 	frame.SetFin()
 	frame.SetPayloadSize(int64(len(p)))
+
+	if c.isClose {
+		return 0, fmt.Errorf("conn is closed")
+	}
 
 	c.WriteChan <- frame
 

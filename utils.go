@@ -4,23 +4,10 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"hash"
-	"reflect"
 	"sync"
-	"unsafe"
 )
 
 var uidKey = []byte("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
-
-func s2b(s string) []byte {
-	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	bh := reflect.SliceHeader{
-		Data: sh.Data,
-		Len:  sh.Len,
-		Cap:  sh.Len,
-	}
-
-	return *(*[]byte)(unsafe.Pointer(&bh))
-}
 
 var shaPool = sync.Pool{
 	New: func() interface{} {

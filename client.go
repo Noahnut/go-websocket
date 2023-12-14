@@ -3,6 +3,7 @@ package websocket
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"unsafe"
@@ -78,29 +79,47 @@ func (c *Client) Write(p []byte) {
 	frame.SetPayload(p)
 	frame.SetPayloadSize(int64(len(p)))
 
-	fmt.Println("client write: ", frame)
 	if _, err := frame.WriteTo(c.rwBuffer); err == nil {
 		c.rwBuffer.Flush()
 	}
 }
 
-func (c *Client) Read() []byte {
+func (c *Client) Read() (frameTypeCode, []byte, error) {
 
 	newFrame := NewFrame()
 
 	if _, err := newFrame.ReadFrom(c.rwBuffer); err != nil {
-		return nil
+		return codeUnknown, nil, err
 	}
 
-	return newFrame.GetPayload()
+	return newFrame.GetFrameType(), newFrame.GetPayload(), nil
 }
 
-func (c *Client) Close() {
+func (c *Client) Close() (frameTypeCode, websocketStatusCode) {
 	frame := NewFrame()
 
 	frame.SetFin()
 	frame.SetFrameType(codeClose)
 	frame.SetStatus(websocketStatusCodeNormalClosure)
+
+	if _, err := frame.WriteTo(c.rwBuffer); err == nil {
+		c.rwBuffer.Flush()
+	}
+
+	frameType, payload, _ := c.Read()
+
+	c.c.Close()
+
+	status := websocketStatusCode(binary.BigEndian.Uint16(payload))
+
+	return frameType, status
+}
+
+func (c *Client) Ping() {
+	frame := NewFrame()
+
+	frame.SetFin()
+	frame.SetFrameType(codePing)
 
 	if _, err := frame.WriteTo(c.rwBuffer); err == nil {
 		c.rwBuffer.Flush()

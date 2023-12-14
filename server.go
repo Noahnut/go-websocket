@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"net"
 
 	"github.com/valyala/fasthttp"
@@ -12,7 +11,18 @@ import (
 
 type MessageHandler func(c *Conn, data []byte)
 
+var (
+	ErrorWebsocketHeaderConnectionValueShouldBeUpgrade error = errors.New("websocket header Connection value should be Upgrade")
+	ErrorWebsocketMethodMustBeGet                            = errors.New("websocket METHOD must be GET")
+	ErrorWebsocketHeaderUpgradeValueShouldBeWebsocket        = errors.New("websocket header Upgrade value should be websocket")
+	ErrorWebsocketHeaderSecWebSocketVersionValue             = errors.New("websocket header Sec-WebSocket-Version value should be 13")
+	ErrorWebsocketHeaderSecWebSocketKey                      = errors.New("websocket header Sec-WebSocket-Key should be base64 and size is 16")
+	ErrorRequestOriginNotSameAsWebsocketOrigin               = errors.New("request origin not same as websocket origin")
+)
+
 type Server struct {
+	CheckOrigin func(ctx *fasthttp.RequestCtx) bool
+
 	messageHandler MessageHandler
 }
 
@@ -22,49 +32,47 @@ func (s *Server) SetMessageHandler(messageHandler MessageHandler) {
 
 // Upgrade upgrade http connection to websocket connection
 func (s *Server) Upgrade(ctx *fasthttp.RequestCtx) error {
-
-	var err error
-
 	// websocket header Connection value should be Upgrade
 	if !ctx.Request.Header.ConnectionUpgrade() {
-		err = errors.New("websocket header Connection value should be Upgrade")
-		return err
+		return ErrorWebsocketHeaderConnectionValueShouldBeUpgrade
 	}
 
 	// websocket METHOD must be GET
-	if !bytes.Equal(ctx.Request.Header.Method(), GetString) {
-		err = errors.New("websocket METHOD must be GET")
-		return err
+	if !bytes.Equal(ctx.Request.Header.Method(), getString) {
+		return ErrorWebsocketMethodMustBeGet
 	}
 
 	// websocket header Upgrade value should be websocket
 	if !bytes.Equal(ctx.Request.Header.PeekBytes(upgradeString), webSocketString) {
-		err = errors.New("websocket header Upgrade value should be websocket")
-		return err
+		return ErrorWebsocketHeaderUpgradeValueShouldBeWebsocket
 	}
 
 	// websocket header Sec-WebSocket-Version value should be 13
 	if !bytes.Equal(ctx.Request.Header.PeekBytes(websocketVersionString), websocketAcceptVersionString) {
-		err = errors.New("websocket header Sec-WebSocket-Version value should be 13")
-		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
-		return err
+		return ErrorWebsocketHeaderSecWebSocketVersionValue
+	}
+
+	if s.CheckOrigin == nil {
+		s.CheckOrigin = checkSameOrigin
+	}
+
+	if !s.CheckOrigin(ctx) {
+		return ErrorRequestOriginNotSameAsWebsocketOrigin
 	}
 
 	websocketKey := ctx.Request.Header.PeekBytes(websocketKeyString)
 
 	// websocket header Sec-WebSocket-Key should be base64 and size is 16
 	if !isValidChallengeKeys(websocketKey) {
-		err = errors.New("websocket header Sec-WebSocket-Key should be base64 and size is 16 websocketKey" + string(websocketKey))
-		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
-		return err
+		return ErrorWebsocketHeaderSecWebSocketKey
 	}
 
 	// compute Sec-WebSocket-Accept key
 	acceptKey := computeAcceptKey(websocketKey)
+	ctx.Response.Header.SetBytesKV(websocketAcceptString, acceptKey)
 
 	ctx.Response.Header.SetBytesKV(upgradeString, webSocketString)
 	ctx.Response.Header.SetBytesKV(connectionString, upgradeString)
-	ctx.Response.Header.SetBytesKV(websocketAcceptString, acceptKey)
 	ctx.Response.SetStatusCode(fasthttp.StatusSwitchingProtocols)
 
 	// hijack the connection to let's server handle the connection
@@ -87,11 +95,10 @@ func (s *Server) serverConn(ctx context.Context, conn *Conn) {
 
 		// clean all the channel data prevent goroutine leak
 		close(conn.ReadChan)
-		close(conn.WriteChan)
-		for range conn.ReadChan {
-		}
 
-		for range conn.WriteChan {
+		// clean all the frame data
+		for frame := range conn.ReadChan {
+			s.frameHandler(conn, frame)
 		}
 
 		conn.c.Close()
@@ -100,10 +107,8 @@ func (s *Server) serverConn(ctx context.Context, conn *Conn) {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("serverConn ctx done")
 			return
 		case frame := <-conn.ReadChan:
-			fmt.Println("server read Frame", frame.String())
 			s.frameHandler(conn, frame)
 		}
 	}
@@ -141,4 +146,19 @@ func (s *Server) pongHandler(conn *Conn, frame *Frame) {
 
 func (s *Server) dataFrameHandler(conn *Conn, frame *Frame) {
 	s.messageHandler(conn, frame.payload)
+}
+
+func checkSameOrigin(ctx *fasthttp.RequestCtx) bool {
+
+	origin := ctx.Request.Header.PeekBytes(originString)
+
+	if len(origin) == 0 {
+		return true
+	}
+
+	if bytes.Equal(origin, ctx.Host()) {
+		return true
+	}
+
+	return false
 }

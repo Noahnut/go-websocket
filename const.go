@@ -10,7 +10,8 @@ var (
 	websocketVersionString       = []byte("Sec-WebSocket-Version")
 	websocketAcceptVersionString = []byte("13")
 	websocketAcceptString        = []byte("Sec-WebSocket-Accept")
-	GetString                    = []byte("GET")
+	getString                    = []byte("GET")
+	originString                 = []byte("Origin")
 )
 
 type frameTypeCode uint8
@@ -27,6 +28,8 @@ const (
 	codePing frameTypeCode = 0x9
 
 	codePong frameTypeCode = 0xA
+
+	codeUnknown frameTypeCode = 0xFF
 )
 
 func (f frameTypeCode) String() string {

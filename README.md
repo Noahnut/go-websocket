@@ -30,7 +30,6 @@ func websocketServer() {
 }
 
 
-
 ```
 
 ## Client
@@ -45,7 +44,7 @@ func websocketClient() {
 
 	client.Write([]byte("hello world"))
 
-	fmt.Println(string(client.Read()))
+	frameType, payload, _ = client.Read()
 
 	client.Close()
 }
