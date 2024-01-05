@@ -3,11 +3,7 @@ package websocket
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net"
-	"os"
-	"runtime"
-	"time"
 
 	"github.com/valyala/fasthttp"
 )
@@ -23,22 +19,24 @@ const (
 	ErrorRequestOriginNotSameAsWebsocketOrigin         = "request origin not same as websocket origin"
 )
 
+// This is for debug goroutine leak
+/*
 func routineMonitor() {
 
-	ticker := time.Tick(500 * time.Millisecond)
+		ticker := time.Tick(500 * time.Millisecond)
 
-	for {
-		select {
-		case <-ticker:
-			fmt.Fprintf(os.Stderr, "%d\n", runtime.NumGoroutine())
+		for {
+			select {
+			case <-ticker:
+				fmt.Fprintf(os.Stderr, "%d\n", runtime.NumGoroutine())
+			}
 		}
 	}
-}
 
-func init() {
-	go routineMonitor()
-}
-
+	func init() {
+		go routineMonitor()
+	}
+*/
 type Server struct {
 	CheckOrigin func(ctx *fasthttp.RequestCtx) bool
 
