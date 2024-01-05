@@ -89,6 +89,7 @@ loop:
 			} else {
 				c.isClose = true
 				c.cancel()
+				ReleaseFrame(frame)
 				break loop
 			}
 

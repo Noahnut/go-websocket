@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -119,6 +120,10 @@ func (f *Frame) SetPayloadSize(payloadSize int64) {
 	f.payloadSize = payloadSize
 }
 
+func (f *Frame) SetMask() {
+	f.mask = true
+}
+
 func (f *Frame) SetFin() {
 	f.isFin = true
 }
@@ -130,7 +135,6 @@ func (f *Frame) SetStatus(status websocketStatusCode) {
 }
 
 func (f *Frame) WriteTo(wr io.Writer) (int64, error) {
-
 	var n int64
 
 	header := make([]byte, 2)
@@ -155,8 +159,7 @@ func (f *Frame) WriteTo(wr io.Writer) (int64, error) {
 
 	if f.mask {
 		header[1] |= mask
-		// TODO
-		// if mask should set the mask key
+		f.maskPayload()
 	}
 
 	var payloadLenBytes []byte
@@ -184,7 +187,6 @@ func (f *Frame) WriteTo(wr io.Writer) (int64, error) {
 	n += int64(ni)
 
 	if f.mask {
-
 		ni, err := wr.Write(f.maskKey)
 
 		if err != nil {
@@ -210,6 +212,16 @@ func (f *Frame) WriteTo(wr io.Writer) (int64, error) {
 func (f *Frame) UnMask() {
 	for i := range f.payload {
 		f.payload[i] ^= f.maskKey[i&3]
+	}
+}
+
+func (f *Frame) maskPayload() {
+	rand.Read(f.maskKey)
+
+	if len(f.payload) > 0 {
+		for i := range f.payload {
+			f.payload[i] ^= f.maskKey[i&3]
+		}
 	}
 }
 

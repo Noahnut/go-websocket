@@ -1,7 +1,6 @@
 package websocket
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 
@@ -19,11 +18,7 @@ func Test_SimpleWsServer(t *testing.T) {
 		defer waitGroup.Done()
 
 		fasthttp.ListenAndServe(":8009", func(ctx *fasthttp.RequestCtx) {
-			err := wsServer.Upgrade(ctx)
-
-			if err != nil {
-				fmt.Println(err)
-			}
+			wsServer.Upgrade(ctx)
 
 		})
 	}()

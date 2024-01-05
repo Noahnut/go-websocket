@@ -79,6 +79,7 @@ func (c *Client) Write(p []byte) {
 	frame.SetFrameType(codeText)
 	frame.SetPayload(p)
 	frame.SetPayloadSize(int64(len(p)))
+	frame.SetMask()
 
 	if _, err := frame.WriteTo(c.rwBuffer); err == nil {
 		c.rwBuffer.Flush()
