@@ -3,7 +3,11 @@ package websocket
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
+	"os"
+	"runtime"
+	"time"
 
 	"github.com/valyala/fasthttp"
 )
@@ -18,6 +22,22 @@ const (
 	ErrorWebsocketHeaderSecWebSocketKey                = "websocket header Sec-WebSocket-Key should be base64 and size is 16"
 	ErrorRequestOriginNotSameAsWebsocketOrigin         = "request origin not same as websocket origin"
 )
+
+func routineMonitor() {
+
+	ticker := time.Tick(500 * time.Millisecond)
+
+	for {
+		select {
+		case <-ticker:
+			fmt.Fprintf(os.Stderr, "%d\n", runtime.NumGoroutine())
+		}
+	}
+}
+
+func init() {
+	go routineMonitor()
+}
 
 type Server struct {
 	CheckOrigin func(ctx *fasthttp.RequestCtx) bool
@@ -101,41 +121,39 @@ func (s *Server) Upgrade(ctx *fasthttp.RequestCtx) {
 
 func (s *Server) serverConn(ctx context.Context, conn *Conn) {
 
-	defer func() {
-		// clean all the channel data prevent goroutine leak
-		conn.c.Close()
-
-		for len(conn.ReadChan) > 0 {
-			fr, ok := <-conn.ReadChan
-
-			if !ok {
-				break
-			}
-
-			if !fr.IsControl() {
-				s.frameHandler(conn, fr)
-			}
-
-			ReleaseFrame(fr)
-		}
-
-		conn.waitGroup.Wait()
-	}()
-
+loop:
 	for {
 		select {
 		case <-conn.ctx.Done():
-			return
+			break loop
 		case frame := <-conn.ReadChan:
 			s.frameHandler(conn, frame)
 			ReleaseFrame(frame)
 
 			if conn.isClose {
-				return
+				break loop
 			}
 		}
 	}
 
+	// clean all the channel data prevent goroutine leak
+	conn.c.Close()
+
+	for len(conn.ReadChan) > 0 {
+		fr, ok := <-conn.ReadChan
+
+		if !ok {
+			break
+		}
+
+		if !fr.IsControl() {
+			s.frameHandler(conn, fr)
+		}
+
+		ReleaseFrame(fr)
+	}
+
+	conn.waitGroup.Wait()
 }
 
 func (s *Server) frameHandler(conn *Conn, frame *Frame) {

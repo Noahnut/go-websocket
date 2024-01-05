@@ -52,8 +52,6 @@ func NewConn(ctx context.Context, conn net.Conn, cancel context.CancelFunc) *Con
 }
 
 func (c *Conn) readLoop() {
-	defer c.waitGroup.Done()
-
 	for {
 
 		newFrame := AcquireFrame()
@@ -65,7 +63,7 @@ func (c *Conn) readLoop() {
 			c.cancel()
 
 			ReleaseFrame(newFrame)
-			return
+			break
 		}
 
 		c.ReadChan <- newFrame
@@ -73,32 +71,16 @@ func (c *Conn) readLoop() {
 		// receive close frame just end readLoop routine
 		if newFrame.IsClose() || c.isClose {
 			c.isClose = true
-			return
+			break
 		}
 
 	}
+
+	c.waitGroup.Done()
 }
 
 func (c *Conn) writeLoop() {
-
-	defer func() {
-		for len(c.WriteChan) > 0 {
-			fr, ok := <-c.WriteChan
-
-			if !ok {
-				break
-			}
-
-			if _, err := fr.WriteTo(c.bufferWriter); err != nil {
-				break
-			}
-
-			ReleaseFrame(fr)
-		}
-
-		c.waitGroup.Done()
-	}()
-
+loop:
 	for {
 		select {
 		case frame := <-c.WriteChan:
@@ -107,18 +89,34 @@ func (c *Conn) writeLoop() {
 			} else {
 				c.isClose = true
 				c.cancel()
-				return
+				break loop
 			}
 
 			ReleaseFrame(frame)
 
 			if frame.IsClose() {
-				return
+				break loop
 			}
 		case <-c.ctx.Done():
-			return
+			break loop
 		}
 	}
+
+	for len(c.WriteChan) > 0 {
+		fr, ok := <-c.WriteChan
+
+		if !ok {
+			break
+		}
+
+		if _, err := fr.WriteTo(c.bufferWriter); err != nil {
+			break
+		}
+
+		ReleaseFrame(fr)
+	}
+
+	c.waitGroup.Done()
 }
 
 func (c *Conn) Write(p []byte) (int, error) {
