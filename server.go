@@ -8,7 +8,16 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-type MessageHandler func(c *Conn, data []byte)
+type (
+	// MessageHandler handle the frame type is text message from client
+	MessageHandler func(c *Conn, data []byte)
+
+	// PingHandler handle the frame type is ping from client
+	PingHandler func(c *Conn, data []byte)
+
+	// PongHandler handle the frame type is pong from client
+	PongHandler func(c *Conn, data []byte)
+)
 
 const (
 	ErrorWebsocketHeaderConnectionValueShouldBeUpgrade = "websocket header Connection value should be Upgrade"
@@ -41,10 +50,22 @@ type Server struct {
 	CheckOrigin func(ctx *fasthttp.RequestCtx) bool
 
 	messageHandler MessageHandler
+
+	pingHandler PingHandler
+
+	pongHandler PongHandler
 }
 
 func (s *Server) SetMessageHandler(messageHandler MessageHandler) {
 	s.messageHandler = messageHandler
+}
+
+func (s *Server) SetPingHandler(pingHandler PingHandler) {
+	s.pingHandler = pingHandler
+}
+
+func (s *Server) SetPongHandler(pongHandler PongHandler) {
+	s.pongHandler = pongHandler
 }
 
 // Upgrade upgrade http connection to websocket connection
@@ -160,9 +181,14 @@ func (s *Server) frameHandler(conn *Conn, frame *Frame) {
 		case codeClose:
 			s.closeHandler(conn, frame)
 		case codePing:
-			s.pingHandler(conn, frame)
+			if s.pingHandler != nil {
+				s.pingHandler(conn, frame.payload)
+			}
+
 		case codePong:
-			s.pongHandler(conn, frame)
+			if s.pongHandler != nil {
+				s.pongHandler(conn, frame.payload)
+			}
 		}
 	} else {
 		s.dataFrameHandler(conn, frame)
@@ -173,16 +199,10 @@ func (s *Server) closeHandler(conn *Conn, frame *Frame) {
 	conn.Close()
 }
 
-func (s *Server) pingHandler(conn *Conn, frame *Frame) {
-	conn.Pong()
-}
-
-func (s *Server) pongHandler(conn *Conn, frame *Frame) {
-
-}
-
 func (s *Server) dataFrameHandler(conn *Conn, frame *Frame) {
-	s.messageHandler(conn, frame.payload)
+	if s.messageHandler != nil {
+		s.messageHandler(conn, frame.payload)
+	}
 }
 
 func checkSameOrigin(ctx *fasthttp.RequestCtx) bool {
