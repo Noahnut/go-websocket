@@ -111,6 +111,8 @@ loop:
 
 		if _, err := fr.WriteTo(c.bufferWriter); err != nil {
 			break
+		} else {
+			c.bufferWriter.Flush()
 		}
 
 		ReleaseFrame(fr)

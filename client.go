@@ -86,9 +86,7 @@ func (c *Client) Write(p []byte) {
 }
 
 func (c *Client) Read() (frameTypeCode, []byte, error) {
-
-	newFrame := AcquireFrame()
-	defer ReleaseFrame(newFrame)
+	newFrame := newFrame()
 
 	if _, err := newFrame.ReadFrom(c.rwBuffer); err != nil {
 		return codeUnknown, nil, err

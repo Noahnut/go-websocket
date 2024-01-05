@@ -10,23 +10,34 @@ websocket implement by [fasthttp](https://github.com/valyala/fasthttp)
 
 ```go
 func websocketServer() {
+	// simple sample for websocket server and client
+func websocketServer() {
 	wsServer := websocket.Server{}
 
-	messageHandler := func(c *websocket.Conn, data []byte) {
+	messageHandler := func(c *websocket.Conn, isBinary bool, data []byte) {
 		fmt.Println(string(data))
-
 		c.Write([]byte("receive data from client"))
 	}
 
+	pingHandler := func(c *websocket.Conn, data []byte) {
+		fmt.Println("receive ping from client")
+		c.Pong()
+	}
+
 	wsServer.SetMessageHandler(messageHandler)
+	wsServer.SetPingHandler(pingHandler)
 
-	fasthttp.ListenAndServe(":8009", func(ctx *fasthttp.RequestCtx) {
-		err := wsServer.Upgrade(ctx)
+	router := router.New()
 
-		if err != nil {
-			panic(err)
-		}
-	})
+	router.GET("/ws", wsServer.Upgrade)
+	router.GET("/debug/pprof/{profile:*}", pprofhandler.PprofHandler)
+
+	server := fasthttp.Server{
+		Handler: router.Handler,
+	}
+
+	server.ListenAndServe(":8009")
+}
 }
 
 
@@ -36,16 +47,26 @@ func websocketServer() {
 
 ```go
 func websocketClient() {
-	client, err := websocket.NewClient("ws://localhost:8009")
+client, err := websocket.NewClient("ws://localhost:8009/ws")
 
 	if err != nil {
 		panic(err)
 	}
 
+	client.Ping()
+
+	frameType, payload, _ := client.Read()
+
+	fmt.Println(frameType, string(payload))
+
 	client.Write([]byte("hello world"))
 
 	frameType, payload, _ = client.Read()
 
-	client.Close()
+	fmt.Println(frameType, string(payload))
+
+	frameType, status := client.Close()
+
+	fmt.Printf("close frameType %d status %d\n", frameType, status)
 }
 ```

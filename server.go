@@ -10,7 +10,7 @@ import (
 
 type (
 	// MessageHandler handle the frame type is text message from client
-	MessageHandler func(c *Conn, data []byte)
+	MessageHandler func(c *Conn, isBinary bool, data []byte)
 
 	// PingHandler handle the frame type is ping from client
 	PingHandler func(c *Conn, data []byte)
@@ -201,7 +201,9 @@ func (s *Server) closeHandler(conn *Conn, frame *Frame) {
 
 func (s *Server) dataFrameHandler(conn *Conn, frame *Frame) {
 	if s.messageHandler != nil {
-		s.messageHandler(conn, frame.payload)
+		isBinary := frame.frameType == codeBinary
+
+		s.messageHandler(conn, isBinary, frame.payload)
 	}
 }
 
