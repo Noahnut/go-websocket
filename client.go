@@ -72,7 +72,8 @@ func NewClient(url string) (*Client, error) {
 
 func (c *Client) Write(p []byte) {
 
-	frame := NewFrame()
+	frame := AcquireFrame()
+	defer ReleaseFrame(frame)
 
 	frame.SetFin()
 	frame.SetFrameType(codeText)
@@ -86,7 +87,8 @@ func (c *Client) Write(p []byte) {
 
 func (c *Client) Read() (frameTypeCode, []byte, error) {
 
-	newFrame := NewFrame()
+	newFrame := AcquireFrame()
+	defer ReleaseFrame(newFrame)
 
 	if _, err := newFrame.ReadFrom(c.rwBuffer); err != nil {
 		return codeUnknown, nil, err
@@ -96,7 +98,8 @@ func (c *Client) Read() (frameTypeCode, []byte, error) {
 }
 
 func (c *Client) Close() (frameTypeCode, websocketStatusCode) {
-	frame := NewFrame()
+	frame := AcquireFrame()
+	defer ReleaseFrame(frame)
 
 	frame.SetFin()
 	frame.SetFrameType(codeClose)
@@ -116,7 +119,8 @@ func (c *Client) Close() (frameTypeCode, websocketStatusCode) {
 }
 
 func (c *Client) Ping() {
-	frame := NewFrame()
+	frame := AcquireFrame()
+	defer ReleaseFrame(frame)
 
 	frame.SetFin()
 	frame.SetFrameType(codePing)

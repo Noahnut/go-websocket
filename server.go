@@ -3,7 +3,6 @@ package websocket
 import (
 	"bytes"
 	"context"
-	"errors"
 	"net"
 
 	"github.com/valyala/fasthttp"
@@ -11,13 +10,13 @@ import (
 
 type MessageHandler func(c *Conn, data []byte)
 
-var (
-	ErrorWebsocketHeaderConnectionValueShouldBeUpgrade error = errors.New("websocket header Connection value should be Upgrade")
-	ErrorWebsocketMethodMustBeGet                            = errors.New("websocket METHOD must be GET")
-	ErrorWebsocketHeaderUpgradeValueShouldBeWebsocket        = errors.New("websocket header Upgrade value should be websocket")
-	ErrorWebsocketHeaderSecWebSocketVersionValue             = errors.New("websocket header Sec-WebSocket-Version value should be 13")
-	ErrorWebsocketHeaderSecWebSocketKey                      = errors.New("websocket header Sec-WebSocket-Key should be base64 and size is 16")
-	ErrorRequestOriginNotSameAsWebsocketOrigin               = errors.New("request origin not same as websocket origin")
+const (
+	ErrorWebsocketHeaderConnectionValueShouldBeUpgrade = "websocket header Connection value should be Upgrade"
+	ErrorWebsocketMethodMustBeGet                      = "websocket METHOD must be GET"
+	ErrorWebsocketHeaderUpgradeValueShouldBeWebsocket  = "websocket header Upgrade value should be websocket"
+	ErrorWebsocketHeaderSecWebSocketVersionValue       = "websocket header Sec-WebSocket-Version value should be 13"
+	ErrorWebsocketHeaderSecWebSocketKey                = "websocket header Sec-WebSocket-Key should be base64 and size is 16"
+	ErrorRequestOriginNotSameAsWebsocketOrigin         = "request origin not same as websocket origin"
 )
 
 type Server struct {
@@ -31,25 +30,33 @@ func (s *Server) SetMessageHandler(messageHandler MessageHandler) {
 }
 
 // Upgrade upgrade http connection to websocket connection
-func (s *Server) Upgrade(ctx *fasthttp.RequestCtx) error {
+func (s *Server) Upgrade(ctx *fasthttp.RequestCtx) {
 	// websocket header Connection value should be Upgrade
 	if !ctx.Request.Header.ConnectionUpgrade() {
-		return ErrorWebsocketHeaderConnectionValueShouldBeUpgrade
+		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
+		ctx.Response.SetBodyString(ErrorWebsocketHeaderConnectionValueShouldBeUpgrade)
+		return
 	}
 
 	// websocket METHOD must be GET
 	if !bytes.Equal(ctx.Request.Header.Method(), getString) {
-		return ErrorWebsocketMethodMustBeGet
+		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
+		ctx.Response.SetBodyString(ErrorWebsocketMethodMustBeGet)
+		return
 	}
 
 	// websocket header Upgrade value should be websocket
 	if !bytes.Equal(ctx.Request.Header.PeekBytes(upgradeString), webSocketString) {
-		return ErrorWebsocketHeaderUpgradeValueShouldBeWebsocket
+		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
+		ctx.Response.SetBodyString(ErrorWebsocketHeaderUpgradeValueShouldBeWebsocket)
+		return
 	}
 
 	// websocket header Sec-WebSocket-Version value should be 13
 	if !bytes.Equal(ctx.Request.Header.PeekBytes(websocketVersionString), websocketAcceptVersionString) {
-		return ErrorWebsocketHeaderSecWebSocketVersionValue
+		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
+		ctx.Response.SetBodyString(ErrorWebsocketHeaderSecWebSocketVersionValue)
+		return
 	}
 
 	if s.CheckOrigin == nil {
@@ -57,14 +64,18 @@ func (s *Server) Upgrade(ctx *fasthttp.RequestCtx) error {
 	}
 
 	if !s.CheckOrigin(ctx) {
-		return ErrorRequestOriginNotSameAsWebsocketOrigin
+		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
+		ctx.Response.SetBodyString(ErrorRequestOriginNotSameAsWebsocketOrigin)
+		return
 	}
 
 	websocketKey := ctx.Request.Header.PeekBytes(websocketKeyString)
 
 	// websocket header Sec-WebSocket-Key should be base64 and size is 16
 	if !isValidChallengeKeys(websocketKey) {
-		return ErrorWebsocketHeaderSecWebSocketKey
+		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
+		ctx.Response.SetBodyString(ErrorWebsocketHeaderSecWebSocketKey)
+		return
 	}
 
 	// compute Sec-WebSocket-Accept key
@@ -85,38 +96,49 @@ func (s *Server) Upgrade(ctx *fasthttp.RequestCtx) error {
 		s.serverConn(ctx, conn)
 	})
 
-	return nil
+	return
 }
 
 func (s *Server) serverConn(ctx context.Context, conn *Conn) {
 
 	defer func() {
-		conn.waitGroup.Wait()
-
 		// clean all the channel data prevent goroutine leak
-		close(conn.ReadChan)
+		conn.c.Close()
 
-		// clean all the frame data
-		for frame := range conn.ReadChan {
-			s.frameHandler(conn, frame)
+		for len(conn.ReadChan) > 0 {
+			fr, ok := <-conn.ReadChan
+
+			if !ok {
+				break
+			}
+
+			if !fr.IsControl() {
+				s.frameHandler(conn, fr)
+			}
+
+			ReleaseFrame(fr)
 		}
 
-		conn.c.Close()
+		conn.waitGroup.Wait()
 	}()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-conn.ctx.Done():
 			return
 		case frame := <-conn.ReadChan:
 			s.frameHandler(conn, frame)
+			ReleaseFrame(frame)
+
+			if conn.isClose {
+				return
+			}
 		}
 	}
 
 }
 
 func (s *Server) frameHandler(conn *Conn, frame *Frame) {
-
 	if frame.IsControl() {
 		switch frame.frameType {
 		case codeClose:
@@ -133,7 +155,6 @@ func (s *Server) frameHandler(conn *Conn, frame *Frame) {
 
 func (s *Server) closeHandler(conn *Conn, frame *Frame) {
 	conn.Close()
-	conn.cancel()
 }
 
 func (s *Server) pingHandler(conn *Conn, frame *Frame) {

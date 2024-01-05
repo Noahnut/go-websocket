@@ -4,7 +4,18 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sync"
 )
+
+var maskZeroBytes = []byte{0, 0, 0, 0}
+
+var payloadZeroBytes = func() []byte {
+	b := make([]byte, 128)
+	for i := range b {
+		b[i] = 0
+	}
+	return b
+}()
 
 const (
 	finBit = byte(1 << 7)
@@ -26,11 +37,38 @@ type Frame struct {
 	payload     []byte
 }
 
-func NewFrame() *Frame {
+var framePool = sync.Pool{
+	New: func() interface{} {
+		return newFrame()
+	},
+}
+
+func newFrame() *Frame {
 	return &Frame{
 		maskKey: make([]byte, 4),
 		payload: make([]byte, 0, 128),
 	}
+}
+
+func AcquireFrame() *Frame {
+	return framePool.Get().(*Frame)
+}
+
+func ReleaseFrame(f *Frame) {
+	f.Reset()
+	framePool.Put(f)
+}
+
+func (f *Frame) Reset() {
+	f.isFin = false
+	f.rsv1 = false
+	f.rsv2 = false
+	f.rsv3 = false
+	f.mask = false
+	f.frameType = codeUnknown
+	f.payloadSize = 0
+	copy(f.maskKey, maskZeroBytes)
+	copy(f.payload, payloadZeroBytes)
 }
 
 func (f *Frame) String() string {

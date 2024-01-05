@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	readChanSize  = 1024
-	writeChanSize = 1024
+	readChanSize  = 128
+	writeChanSize = 128
 )
 
 type Conn struct {
@@ -56,18 +56,22 @@ func (c *Conn) readLoop() {
 
 	for {
 
-		newFrame := NewFrame()
+		newFrame := AcquireFrame()
 
-		n, err := newFrame.ReadFrom(c.bufferReader)
+		_, err := newFrame.ReadFrom(c.bufferReader)
 
 		if err != nil {
-			fmt.Println(n, err)
+			c.isClose = true
+			c.cancel()
+
+			ReleaseFrame(newFrame)
+			return
 		}
 
 		c.ReadChan <- newFrame
 
 		// receive close frame just end readLoop routine
-		if newFrame.IsClose() {
+		if newFrame.IsClose() || c.isClose {
 			c.isClose = true
 			return
 		}
@@ -78,16 +82,19 @@ func (c *Conn) readLoop() {
 func (c *Conn) writeLoop() {
 
 	defer func() {
-		remainWrite := len(c.WriteChan)
+		for len(c.WriteChan) > 0 {
+			fr, ok := <-c.WriteChan
 
-		for i := 0; i < remainWrite; i++ {
-			frame := <-c.WriteChan
-			if _, err := frame.WriteTo(c.bufferWriter); err == nil {
-				c.bufferWriter.Flush()
+			if !ok {
+				break
 			}
-		}
 
-		close(c.WriteChan)
+			if _, err := fr.WriteTo(c.bufferWriter); err != nil {
+				break
+			}
+
+			ReleaseFrame(fr)
+		}
 
 		c.waitGroup.Done()
 	}()
@@ -97,8 +104,17 @@ func (c *Conn) writeLoop() {
 		case frame := <-c.WriteChan:
 			if _, err := frame.WriteTo(c.bufferWriter); err == nil {
 				c.bufferWriter.Flush()
+			} else {
+				c.isClose = true
+				c.cancel()
+				return
 			}
 
+			ReleaseFrame(frame)
+
+			if frame.IsClose() {
+				return
+			}
 		case <-c.ctx.Done():
 			return
 		}
@@ -107,7 +123,7 @@ func (c *Conn) writeLoop() {
 
 func (c *Conn) Write(p []byte) (int, error) {
 
-	frame := NewFrame()
+	frame := AcquireFrame()
 
 	frame.SetFrameType(codeText)
 	frame.SetPayload(p)
@@ -125,7 +141,7 @@ func (c *Conn) Write(p []byte) (int, error) {
 
 func (c *Conn) Close() {
 
-	frame := NewFrame()
+	frame := AcquireFrame()
 
 	frame.SetStatus(websocketStatusCodeNormalClosure)
 	frame.SetFrameType(codeClose)
@@ -136,7 +152,7 @@ func (c *Conn) Close() {
 }
 
 func (c *Conn) Ping() {
-	frame := NewFrame()
+	frame := AcquireFrame()
 
 	frame.SetFrameType(codePing)
 	frame.SetFin()
@@ -145,7 +161,7 @@ func (c *Conn) Ping() {
 }
 
 func (c *Conn) Pong() {
-	frame := NewFrame()
+	frame := AcquireFrame()
 
 	frame.SetFrameType(codePong)
 	frame.SetFin()
