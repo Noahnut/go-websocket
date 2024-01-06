@@ -4,11 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"fmt"
+	"errors"
 	"net"
 	"unsafe"
 
 	"github.com/valyala/fasthttp"
+)
+
+var (
+	// ErrCannotUpgrade shows up when an error occurred when upgrading a connection.
+	ErrCannotUpgrade = errors.New("cannot upgrade connection")
 )
 
 type Client struct {
@@ -39,7 +44,7 @@ func NewClient(url string) (*Client, error) {
 	c, err := net.Dial("tcp", *(*string)(unsafe.Pointer(&addr)))
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	req.Header.SetMethod("GET")
@@ -55,11 +60,12 @@ func NewClient(url string) (*Client, error) {
 	req.Write(bw)
 	bw.Flush()
 
-	err = resp.Read(br)
-	if err == nil {
-		if resp.StatusCode() == 101 {
-			fmt.Println("upgrade success")
-		}
+	if err := resp.Read(br); err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode() != fasthttp.StatusSwitchingProtocols {
+		return nil, ErrCannotUpgrade
 	}
 
 	websocketConn := &Client{
@@ -70,7 +76,8 @@ func NewClient(url string) (*Client, error) {
 	return websocketConn, nil
 }
 
-func (c *Client) Write(p []byte) {
+func (c *Client) Write(p []byte) error {
+	var err error
 
 	frame := AcquireFrame()
 	defer ReleaseFrame(frame)
@@ -81,9 +88,11 @@ func (c *Client) Write(p []byte) {
 	frame.SetPayloadSize(int64(len(p)))
 	frame.SetMask()
 
-	if _, err := frame.WriteTo(c.rwBuffer); err == nil {
+	if _, err = frame.WriteTo(c.rwBuffer); err == nil {
 		c.rwBuffer.Flush()
 	}
+
+	return err
 }
 
 func (c *Client) Read() (frameTypeCode, []byte, error) {
@@ -96,7 +105,8 @@ func (c *Client) Read() (frameTypeCode, []byte, error) {
 	return newFrame.GetFrameType(), newFrame.GetPayload(), nil
 }
 
-func (c *Client) Close() (frameTypeCode, websocketStatusCode) {
+func (c *Client) Close() (frameTypeCode, websocketStatusCode, error) {
+
 	frame := AcquireFrame()
 	defer ReleaseFrame(frame)
 
@@ -106,6 +116,8 @@ func (c *Client) Close() (frameTypeCode, websocketStatusCode) {
 
 	if _, err := frame.WriteTo(c.rwBuffer); err == nil {
 		c.rwBuffer.Flush()
+	} else {
+		return codeUnknown, 0, err
 	}
 
 	frameType, payload, _ := c.Read()
@@ -114,17 +126,22 @@ func (c *Client) Close() (frameTypeCode, websocketStatusCode) {
 
 	status := websocketStatusCode(binary.BigEndian.Uint16(payload))
 
-	return frameType, status
+	return frameType, status, nil
 }
 
-func (c *Client) Ping() {
+func (c *Client) Ping() error {
+
+	var err error
+
 	frame := AcquireFrame()
 	defer ReleaseFrame(frame)
 
 	frame.SetFin()
 	frame.SetFrameType(codePing)
 
-	if _, err := frame.WriteTo(c.rwBuffer); err == nil {
+	if _, err = frame.WriteTo(c.rwBuffer); err == nil {
 		c.rwBuffer.Flush()
 	}
+
+	return err
 }
