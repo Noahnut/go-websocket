@@ -93,7 +93,7 @@ func (s *Server) Upgrade(ctx *fasthttp.RequestCtx) {
 
 	// websocket header Sec-WebSocket-Version value should be 13
 	if !bytes.Equal(ctx.Request.Header.PeekBytes(websocketVersionString), websocketAcceptVersionString) {
-		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
+		ctx.Response.SetStatusCode(fasthttp.StatusUpgradeRequired)
 		ctx.Response.SetBodyString(ErrorWebsocketHeaderSecWebSocketVersionValue)
 		return
 	}
@@ -103,7 +103,7 @@ func (s *Server) Upgrade(ctx *fasthttp.RequestCtx) {
 	}
 
 	if !s.CheckOrigin(ctx) {
-		ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
+		ctx.Response.SetStatusCode(fasthttp.StatusForbidden)
 		ctx.Response.SetBodyString(ErrorRequestOriginNotSameAsWebsocketOrigin)
 		return
 	}
